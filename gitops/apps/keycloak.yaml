@@ -1,0 +1,50 @@
+# Child Application: deploys Red Hat Build of Keycloak (RHBK) as the identity
+# provider for Red Hat Developer Hub.
+#
+# sync-wave 3 — after all AI agent components (waves 0–2) are up.
+# developer-hub (wave 4) depends on Keycloak being ready: the configure-rhdh
+# Job reads the keycloak-initial-admin Secret and provisions realm users + the
+# RHDH OIDC client via the Admin API.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_ORG/agentic-doc-generation.git
+    targetRevision: HEAD
+    path: keycloak/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    # OLM adds olm.providedAPIs annotation after install; ignore to prevent drift.
+    - group: operators.coreos.com
+      kind: OperatorGroup
+      jsonPointers:
+        - /metadata/annotations/olm.providedAPIs
+    # KeycloakRealmImport status is managed by the operator, not ArgoCD.
+    - group: k8s.keycloak.org
+      kind: KeycloakRealmImport
+      jsonPointers:
+        - /status

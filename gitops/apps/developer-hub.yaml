@@ -1,0 +1,68 @@
+# Child Application: deploys Red Hat Developer Hub (RHDH 1.10) as the internal
+# developer portal, showing the agentic-doc-generation components in the
+# software catalog and providing OIDC auth via Keycloak (wave 3).
+#
+# sync-wave 4 — after keycloak (wave 3) is deployed so the configure-rhdh
+# Sync Job can call the Keycloak Admin API to create users and the RHDH
+# OIDC client.
+#
+# The RHDH operator Subscription uses Manual install plan approval; the
+# approve-installplan Job inside this path handles the approval automatically.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: developer-hub
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_ORG/agentic-doc-generation.git
+    targetRevision: HEAD
+    path: developer-hub/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rhdh
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    # OLM adds olm.providedAPIs annotation after operator install.
+    - group: operators.coreos.com
+      kind: OperatorGroup
+      jsonPointers:
+        - /metadata/annotations/olm.providedAPIs
+    # OLM changes startingCSV after initial install; ignore to prevent drift.
+    - group: operators.coreos.com
+      kind: Subscription
+      jsonPointers:
+        - /spec/startingCSV
+    # rhdh-secrets data is patched at runtime by the configure-rhdh Job.
+    # ArgoCD must not overwrite real credentials with placeholder values.
+    - group: ""
+      kind: Secret
+      name: rhdh-secrets
+      namespace: rhdh
+      jsonPointers:
+        - /data
+    # ConsoleLink href and imageURL are patched at runtime by the Job.
+    - group: console.openshift.io
+      kind: ConsoleLink
+      name: rhdh
+      jsonPointers:
+        - /spec/href
+        - /spec/applicationMenu/imageURL
