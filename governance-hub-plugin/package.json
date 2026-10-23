@@ -40,6 +40,24 @@
   "backstage": {
     "role": "frontend-plugin"
   },
+  "configSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "govHub": {
+        "type": "object",
+        "description": "Governance Hub plugin configuration",
+        "properties": {
+          "url": {
+            "type": "string",
+            "visibility": "frontend",
+            "description": "URL of the Governance Hub service embedded in the RHDH iframe. Injected via GOVERNANCE_HUB_URL from rhdh-secrets."
+          }
+        },
+        "required": ["url"]
+      }
+    }
+  },
   "scalprum": {
     "name": "mcombi.backstage-plugin-governance-hub",
     "exposedModules": {
