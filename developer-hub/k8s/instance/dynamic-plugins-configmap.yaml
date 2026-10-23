@@ -81,3 +81,19 @@ data:
                       if:
                         allOf:
                           - isArgocdConfigured
+
+      # Governance Hub — custom plugin embedding the governance-hub service.
+      # Visible only to members of role:default/architects (see rbac-policy.yaml).
+      # Source: governance-hub-plugin/ — build with build-and-push.sh.
+      - package: oci://quay.io/mcombi/rhdh-gov-hub:latest
+        disabled: false
+        pluginConfig:
+          dynamicPlugins:
+            frontend:
+              mcombi.backstage-plugin-governance-hub:
+                dynamicRoutes:
+                  - path: /governance-hub
+                    importName: GovHubPage
+                    menuItem:
+                      icon: security
+                      text: Governance Hub

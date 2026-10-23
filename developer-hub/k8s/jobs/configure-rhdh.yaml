@@ -102,7 +102,10 @@ roleRef:
   name: job-configure-rhdh-keycloak-reader
   apiGroup: rbac.authorization.k8s.io
 ---
-# Role in openshift-gitops: read rhdh-local-user Secret (ArgoCD token)
+# Role in openshift-gitops: read rhdh-local-user Secret (ArgoCD token).
+# OPTIONAL — only needed when OpenShift GitOps / ArgoCD is installed.
+# SkipDryRunOnMissingResource prevents ArgoCD from failing its dry-run when
+# the openshift-gitops namespace is absent (e.g. non-GitOps deployments).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -112,12 +115,14 @@ metadata:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
     argocd.argoproj.io/sync-wave: "18"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 rules:
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [rhdh-local-user]
     verbs: [get]
 ---
+# OPTIONAL — see note on Role above.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -127,6 +132,7 @@ metadata:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
     argocd.argoproj.io/sync-wave: "18"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 subjects:
   - kind: ServiceAccount
     name: job-configure-rhdh
@@ -291,6 +297,41 @@ spec:
 
               create_or_update_user "admin" "password"
               create_or_update_user "developer" "password"
+              create_or_update_user "architect" "password"
+
+              # ── 5b. Create Keycloak `architects` group and add `architect` member ──
+              echo "=== Step 5b: Provisioning architects group ==="
+              ARCHITECTS_GROUP_ID=$(curl -sk -H "${AUTH}" \
+                "${KC_URL}/admin/realms/${REALM}/groups?search=architects" \
+                | python3 -c "import sys,json; gs=json.load(sys.stdin); print(next((g['id'] for g in gs if g['name']=='architects'), ''))" 2>/dev/null || echo "")
+
+              if [[ -z "${ARCHITECTS_GROUP_ID}" ]]; then
+                echo "  Creating 'architects' group..."
+                curl -sk -X POST -H "${AUTH}" -H "Content-Type: application/json" \
+                  "${KC_URL}/admin/realms/${REALM}/groups" \
+                  -d "{\"name\":\"architects\"}" -o /dev/null
+                ARCHITECTS_GROUP_ID=$(curl -sk -H "${AUTH}" \
+                  "${KC_URL}/admin/realms/${REALM}/groups?search=architects" \
+                  | python3 -c "import sys,json; gs=json.load(sys.stdin); print(next((g['id'] for g in gs if g['name']=='architects'), ''))" 2>/dev/null || echo "")
+                echo "  Group 'architects' created (${ARCHITECTS_GROUP_ID})."
+              else
+                echo "  Group 'architects' already exists (${ARCHITECTS_GROUP_ID})."
+              fi
+
+              # Add architect user to architects group
+              if [[ -n "${ARCHITECTS_GROUP_ID}" ]]; then
+                ARCHITECT_USER_ID=$(curl -sk -H "${AUTH}" \
+                  "${KC_URL}/admin/realms/${REALM}/users?username=architect&exact=true" \
+                  | python3 -c "import sys,json; users=json.load(sys.stdin); print(users[0]['id'] if users else '')" 2>/dev/null || echo "")
+                if [[ -n "${ARCHITECT_USER_ID}" ]]; then
+                  curl -sk -X PUT -H "${AUTH}" \
+                    "${KC_URL}/admin/realms/${REALM}/users/${ARCHITECT_USER_ID}/groups/${ARCHITECTS_GROUP_ID}" \
+                    -o /dev/null
+                  echo "  User 'architect' added to group 'architects'."
+                else
+                  echo "  WARNING: architect user not found — skipping group membership."
+                fi
+              fi
 
               # ── 6. Discover RHDH route ──────────────────────────────────
               echo "=== Step 6: Discovering RHDH route ==="
@@ -390,6 +431,11 @@ spec:
               OPENAPI_GEN_URL="https://${OPENAPI_GEN_HOST:-openapi-gen-pending.local}"
               echo "  OpenAPI-gen agent URL: ${OPENAPI_GEN_URL}"
 
+              GOV_HUB_HOST=$(oc get route governance-hub -n doc-gen-demo \
+                -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+              GOVERNANCE_HUB_URL="https://${GOV_HUB_HOST:-governance-hub-pending.local}"
+              echo "  Governance Hub URL: ${GOVERNANCE_HUB_URL}"
+
               # ── 11. Generate or reuse SESSION_SECRET ────────────────────
               echo "=== Step 11: SESSION_SECRET ==="
               CURRENT_SESSION=$(oc get secret rhdh-secrets -n rhdh \
@@ -430,7 +476,8 @@ spec:
                   \"RHDH_ARGOCD_TOKEN\":\"$(b64 "${ARGOCD_TOKEN}")\",
                   \"RHDH_KUBERNETES_SA_TOKEN\":\"$(b64 "${KUBE_SA_TOKEN}")\",
                   \"DOC_GEN_AGENT_URL\":\"$(b64 "${DOC_GEN_URL}")\",
-                  \"OPENAPI_GEN_AGENT_URL\":\"$(b64 "${OPENAPI_GEN_URL}")\"
+                  \"OPENAPI_GEN_AGENT_URL\":\"$(b64 "${OPENAPI_GEN_URL}")\",
+                  \"GOVERNANCE_HUB_URL\":\"$(b64 "${GOVERNANCE_HUB_URL}")\"
                 }}"
               echo "  rhdh-secrets patched."
 
@@ -462,5 +509,7 @@ spec:
               echo "  Realm:             ${KC_URL}/realms/${REALM}"
               echo "  Users:             admin / password"
               echo "                     developer / password"
+              echo "                     architect / password  (architects group)"
               echo "  Doc-gen agent:     ${DOC_GEN_URL}"
               echo "  OpenAPI-gen agent: ${OPENAPI_GEN_URL}"
+              echo "  Governance Hub:    ${GOVERNANCE_HUB_URL}"

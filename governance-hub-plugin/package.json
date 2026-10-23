@@ -1,0 +1,54 @@
+{
+  "name": "@mcombi/backstage-plugin-governance-hub",
+  "version": "0.1.0",
+  "description": "RHDH dynamic plugin that embeds the Governance Hub — visible to architects only",
+  "private": true,
+  "main": "dist/index.cjs.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "backstage-cli package build",
+    "export-dynamic": "backstage-cli package export-dynamic-plugin --clean",
+    "build-and-export": "npm run build && npm run export-dynamic",
+    "tsc": "tsc --skipLibCheck"
+  },
+  "dependencies": {
+    "@backstage/core-components": "^0.14.4",
+    "@backstage/core-plugin-api": "^1.9.3",
+    "@backstage/plugin-permission-react": "^0.4.21",
+    "@backstage/plugin-permission-common": "^0.7.13",
+    "react": "^18.0.2"
+  },
+  "devDependencies": {
+    "@backstage/cli": "^0.26.4",
+    "@types/react": "^18.0.2",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
+  },
+  "files": [
+    "dist",
+    "dist-dynamic",
+    "config.d.ts"
+  ],
+  "configSchema": {
+    "$schema": "http://backstage.io/config-schema",
+    "title": "@mcombi/backstage-plugin-governance-hub",
+    "type": "object",
+    "properties": {
+      "govHub": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL of the Governance Hub service to embed"
+          }
+        }
+      }
+    }
+  },
+  "backstage": {
+    "role": "frontend-plugin"
+  }
+}

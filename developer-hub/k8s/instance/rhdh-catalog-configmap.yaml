@@ -34,6 +34,25 @@ data:
       memberOf: [demo-team]
     ---
     apiVersion: backstage.io/v1alpha1
+    kind: User
+    metadata:
+      name: architect
+      description: Platform architect — member of the architects group, has Governance Hub access
+    spec:
+      memberOf: [architects]
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Group
+    metadata:
+      name: architects
+      description: Platform architects with access to the Governance Hub
+    spec:
+      type: team
+      children: []
+      members:
+        - architect
+    ---
+    apiVersion: backstage.io/v1alpha1
     kind: Group
     metadata:
       name: demo-team

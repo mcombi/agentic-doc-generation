@@ -50,7 +50,7 @@ data:
         admin:
           users:
             - name: user:default/admin
-        pluginsWithPermission: [catalog, scaffolder, permission, kubernetes, argocd]
+        pluginsWithPermission: [catalog, scaffolder, permission, kubernetes, argocd, governance-hub]
         policies-csv-file: /opt/app-root/src/rbac/rbac-policies.csv
 
     kubernetes:
@@ -99,6 +99,12 @@ data:
         runIn: local
       publisher:
         type: local
+
+    # Governance Hub plugin configuration.
+    # The URL is discovered from the governance-hub Route in doc-gen-demo by
+    # the configure-rhdh Job and injected via the GOVERNANCE_HUB_URL env var.
+    govHub:
+      url: ${GOVERNANCE_HUB_URL}
 
     dynamicPlugins:
       frontend:
