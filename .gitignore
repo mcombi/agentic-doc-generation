@@ -7,3 +7,7 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+governance-hub-plugin/_node_modules/
+governance-hub-plugin/dist/
+
+
