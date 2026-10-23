@@ -35,7 +35,7 @@ TAG="${1:-latest}"
 # e.g. [{"@mcombi/backstage-plugin-governance-hub": {}}]
 # This is base64-encoded here because passing plain JSON via --annotation
 # results in "Incorrect padding" when RHDH tries to base64-decode it.
-ANNOTATION_JSON='[{"@mcombi/backstage-plugin-governance-hub": {}}]'
+ANNOTATION_JSON='[{"backstage-plugin-governance-hub": {}}]'
 ANNOTATION_B64=$(printf '%s' "${ANNOTATION_JSON}" | base64 | tr -d '\n')
 ANNOTATION="io.backstage.dynamic-packages=${ANNOTATION_B64}"
 

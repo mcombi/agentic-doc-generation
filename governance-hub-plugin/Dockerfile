@@ -34,16 +34,20 @@ COPY src/ ./src/
 # Generate TypeScript declaration files required by backstage-cli build.
 RUN npm run tsc
 
-# Build CommonJS bundle (dist/) then export for RHDH 1.10 dynamic loading.
+# Build CommonJS bundle (dist/) then export for RHDH dynamic loading.
 # npm run export-dynamic -> janus-cli package export-dynamic-plugin --clean
-# which creates dist-dynamic/ containing package.json + scalprum-bundled assets.
+# which creates dist-dynamic/ with scalprum-format bundle (plugin-manifest.json
+# + bundled JS in dist-scalprum/) — required by RHDH's scalprum backend.
 # The io.backstage.dynamic-packages OCI annotation is injected by podman at
 # build time via --annotation (see build-and-push.sh); cannot use LABEL here.
 RUN npm run build && npm run export-dynamic
 
 # ── Final stage: scratch OCI image ──────────────────────────────────────────
-# The image root (/) maps to packagePath "." in io.backstage.dynamic-packages.
+# RHDH's install-dynamic-plugins.py extracts the OCI image and looks for the
+# plugin at the subdirectory path matching the annotation key.
+# The annotation key is "backstage-plugin-governance-hub", so plugin files must
+# live at /backstage-plugin-governance-hub/ in the image.
 # The annotation is injected at build time via podman build --annotation (see
 # build-and-push.sh); it cannot be set here with LABEL.
 FROM scratch
-COPY --from=build /app/dist-dynamic /
+COPY --from=build /app/dist-dynamic /backstage-plugin-governance-hub/
