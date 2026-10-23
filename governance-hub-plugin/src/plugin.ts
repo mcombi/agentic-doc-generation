@@ -14,7 +14,6 @@ import { rootRouteRef } from './routes';
 export const govHubViewPermission = createPermission({
   name: 'governance-hub.view',
   attributes: { action: 'read' },
-  resourceType: undefined,
 });
 
 export const govHubPlugin = createPlugin({

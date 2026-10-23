@@ -4,6 +4,8 @@
   "include": ["src"],
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": ".",
+    "declaration": true,
+    "declarationDir": "dist-types"
   }
 }

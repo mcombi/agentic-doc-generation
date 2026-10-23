@@ -85,8 +85,6 @@ data:
       # Governance Hub — custom plugin embedding the governance-hub service.
       # Visible only to members of role:default/architects (see rbac-policy.yaml).
       # Source: governance-hub-plugin/ — build with build-and-push.sh.
-      # TEMPORARILY DISABLED: OCI image not yet built (quay.io/mcombi/rhdh-gov-hub:latest missing).
-      # Re-enable (disabled: false) after building via `oc start-build governance-hub -n doc-gen-demo`.
       - package: oci://quay.io/mcombi/rhdh-gov-hub:latest
         disabled: true
         pluginConfig:

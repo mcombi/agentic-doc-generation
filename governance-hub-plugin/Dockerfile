@@ -20,11 +20,14 @@ WORKDIR /app
 
 # Install dependencies first for better layer caching
 COPY package.json ./
-RUN npm install --legacy-peer-deps --no-audit
+RUN npm install --legacy-peer-deps --no-audit --include=peer
 
 # Copy source and build configuration
 COPY tsconfig.json ./
 COPY src/ ./src/
+
+# Generate TypeScript declaration files (dist-types/) required by backstage-cli package build
+RUN npm run tsc
 
 # Build the plugin bundle and export for dynamic plugin loading
 RUN npm run build && npm run export-dynamic
