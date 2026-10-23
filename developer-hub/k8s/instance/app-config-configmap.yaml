@@ -22,6 +22,15 @@ data:
       baseUrl: ${RHDH_BASE_URL}
       cors:
         origin: ${RHDH_BASE_URL}
+      # Allow the governance-hub iframe (and other agent UIs on the same
+      # cluster apps domain) to load inside RHDH pages. Without this,
+      # Backstage's default helmet CSP (default-src 'self') blocks all
+      # cross-origin iframes, causing Chrome to show
+      # "This content is blocked. Contact the site owner to fix the issue."
+      csp:
+        frame-src:
+          - "'self'"
+          - "https://*.apps.ocp.446zs.sandbox2386.opentlc.com"
       reading:
         allow:
           - host: raw.githubusercontent.com
