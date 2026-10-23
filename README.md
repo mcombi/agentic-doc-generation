@@ -47,6 +47,14 @@ flowchart TB
             end
             GitHubMCP["GitHub MCP Server\n:8080"]
         end
+
+        subgraph keycloak_ns [keycloak namespace]
+            RHBK["Red Hat Build of Keycloak\nplatform realm"]
+        end
+
+        subgraph rhdh_ns [rhdh namespace]
+            RHDH["Red Hat Developer Hub\nBackstage + plugins"]
+        end
     end
 
     subgraph external [External Infrastructure]
@@ -55,6 +63,7 @@ flowchart TB
 
     Browser -->|"repo URL"| DocGradio
     Browser -->|"repo URL"| ApiGradio
+    Browser -->|"OIDC login"| RHDH
     DocGradio -->|"Responses API"| DocOGX
     ApiGradio -->|"Responses API"| ApiOGX
     DocOGX -->|"MCP tools"| GitHubMCP
@@ -62,8 +71,11 @@ flowchart TB
     DocOGX -->|"inference (HTTPS)"| InferenceEndpoint
     ApiOGX -->|"inference (HTTPS)"| InferenceEndpoint
     GitHubMCP -->|"GitHub API"| GitHub["github.com"]
+    RHDH -->|"OIDC"| RHBK
     AppOfApps -->|deploys| GitHubMCP
     AppOfApps -->|deploys| demo_ns
+    AppOfApps -->|deploys| RHBK
+    AppOfApps -->|deploys| RHDH
 ```
 
 Agent workflow, simplified from architecture-context's six-phase pipeline
@@ -135,6 +147,12 @@ This single command:
    - **Wave 1** — doc-gen-agent and openapi-gen-agent (each its own
      Gradio UI + OGX sidecar pod), applied concurrently — both depend
      only on wave 0's GitHub MCP server Service DNS name
+   - **Wave 2** — CI/CD pipeline (Tekton resources)
+   - **Wave 3** — Keycloak (RHBK operator + instance) — must be ready
+     before RHDH's `configure-rhdh` Job can provision users and the OIDC
+     client
+   - **Wave 4** — Red Hat Developer Hub (operator + Backstage instance +
+     `configure-rhdh` Job at inner wave 18)
 
 The script finishes by printing the ArgoCD UI route. Watch progress with:
 
@@ -178,6 +196,15 @@ Or deploy a single component:
 ./build-and-deploy-all.sh github-mcp-server
 ./build-and-deploy-all.sh doc-gen-agent
 ./build-and-deploy-all.sh openapi-gen-agent
+```
+
+To include the developer portal stack, deploy in this order (Keycloak
+**must** be running before Developer Hub's `configure-rhdh` Job can
+provision users and the OIDC client):
+
+```bash
+bash keycloak/build-and-deploy.sh          # idempotent — skips if already running
+bash developer-hub/build-and-deploy.sh     # waits for Keycloak, then brings up RHDH
 ```
 
 ## Demo walkthrough
@@ -277,6 +304,20 @@ agentic-doc-generation/
 │   ├── pipelinerun-example.yaml
 │   └── k8s/                             # includes tasks/invoke-doc-gen-agent-task.yaml and
 │                                         # tasks/invoke-openapi-gen-agent-task.yaml
+├── keycloak/                            # Red Hat Build of Keycloak (RHBK) — OIDC identity provider
+│   ├── build-and-deploy.sh              # Idempotent deploy: operator + instance + realm shell
+│   └── k8s/
+│       ├── operator/                    # OperatorGroup, Subscription (stable-v26, Automatic)
+│       └── instance/                   # Keycloak CR (dev-file / H2, edge TLS Route)
+├── developer-hub/                       # Red Hat Developer Hub (RHDH 1.10) — internal developer portal
+│   ├── build-and-deploy.sh              # Deploy operator, instance, run configure-rhdh Job
+│   └── k8s/
+│       ├── operator/                    # OperatorGroup, Subscription (fast-1.10, Manual), approve-installplan Job
+│       ├── instance/                    # ConfigMaps, Secrets, Backstage CR, ConsoleLink, RBAC, rbac-policy.yaml
+│       ├── catalog/                     # all.yaml — Backstage entity definitions
+│       └── jobs/                        # configure-rhdh.yaml — ArgoCD Sync hook (wave 18)
+├── governance-hub-plugin/               # Custom RHDH dynamic plugin — Governance Hub embedded UI
+│   └── dist/                            # Built plugin artifact (OCI image published to quay.io/mcombi/rhdh-gov-hub)
 ├── build-and-deploy-all.sh              # Quick-start (non-GitOps) for app components
 ├── install-openshift-ai.sh              # One-time: installs OpenShift AI (AI Hub, AI Studio, MLFlow)
 ├── generate-mcp-catalog-source.sh       # Regenerates mcp-catalog-source.yaml from every */mcp-catalog.yaml
@@ -284,6 +325,94 @@ agentic-doc-generation/
 ├── mcp-catalog-source.yaml              # GENERATED — import into the AI Hub MCP Catalog
 └── README.md
 ```
+
+## Developer portal (RHDH + Keycloak)
+
+The stack includes an internal developer portal powered by
+**Red Hat Developer Hub (RHDH) 1.10** backed by **Red Hat Build of
+Keycloak (RHBK)** for OIDC authentication. Both are optional add-ons —
+the AI agents run without them.
+
+### Red Hat Build of Keycloak (`keycloak/`)
+
+| Property | Value |
+|---|---|
+| Operator | `rhbk-operator`, channel `stable-v26`, **Automatic** install plan |
+| Namespace | `keycloak` |
+| Instance | Keycloak CR, `dev-file` preset (H2 ephemeral DB, suitable for demo) |
+| TLS | Edge-terminated Route |
+| SSO URL | `https://sso.apps.ocp.446zs.sandbox2386.opentlc.com` |
+| Realm | `platform` (shell CR; users, groups, and OIDC client provisioned by the `configure-rhdh` Job) |
+| ArgoCD sync-wave | 3 |
+
+**Provisioned accounts** (all passwords: `password`):
+
+| Username | Group | Portal role |
+|---|---|---|
+| `admin` | — | RHDH admin |
+| `developer` | — | `role:default/developer` |
+| `architect` | `architects` | `role:default/architects` |
+
+Deploy:
+
+```bash
+bash keycloak/build-and-deploy.sh   # idempotent — skips if already running
+```
+
+### Red Hat Developer Hub (`developer-hub/`)
+
+| Property | Value |
+|---|---|
+| Operator | `rhdh-operator`, channel `fast-1.10`, CSV `rhdh-operator.v1.10.6`, **Manual** install plan |
+| Namespace | `rhdh` |
+| Backstage CR | `apiVersion: rhdh.redhat.com/v1alpha5` |
+| Portal URL | `https://backstage-developer-hub-rhdh.apps.ocp.446zs.sandbox2386.opentlc.com` |
+| Auth | OIDC via Keycloak `platform` realm (`signInPage: oidc`) |
+| ArgoCD sync-wave | 4 |
+
+**Dynamic plugins enabled:**
+
+- ArgoCD, Kubernetes, RBAC, Global Header (standard RHDH plugins)
+- **Governance Hub** — custom plugin loaded from
+  `oci://quay.io/mcombi/rhdh-gov-hub:latest`; embeds the Governance Hub
+  service as a portal page, visible only to the `architects` group
+
+**RBAC policy** (`developer-hub/k8s/instance/rbac-policy.yaml`):
+
+| Role | Permissions |
+|---|---|
+| `role:default/developer` | Catalog read, Scaffolder, Kubernetes, ArgoCD |
+| `role:default/architects` | All developer permissions + `governance-hub.view` |
+
+**Software catalog** includes: `doc-gen-agent`, `openapi-gen-agent`,
+`github-mcp-server`, user and group entities.
+
+**`configure-rhdh` Job** (ArgoCD Sync hook, inner wave 18):
+- Auto-discovers live Routes for all components
+- Provisions Keycloak users (`admin`, `developer`, `architect`),
+  the `architects` group, and the RHDH OIDC client in the `platform` realm
+- Patches the `rhdh-secrets` Secret in the `rhdh` namespace
+  (ArgoCD `ignoreDifferences` on `/data` prevents drift loops)
+
+> **Dependency:** Developer Hub **requires** Keycloak to be running first.
+> The `configure-rhdh` Job reads the `keycloak-initial-admin` Secret
+> (created by the RHBK operator) via a cross-namespace RoleBinding to
+> obtain an admin token for the Keycloak Admin API.
+
+Deploy (after Keycloak):
+
+```bash
+bash developer-hub/build-and-deploy.sh
+```
+
+### Governance Hub plugin (`governance-hub-plugin/`)
+
+A custom RHDH dynamic plugin that embeds the Governance Hub service
+directly in the developer portal. It is distributed as an OCI image
+(`quay.io/mcombi/rhdh-gov-hub:latest`) and loaded by RHDH at startup via
+the `dynamicPlugins` section of its ConfigMap. Access is gated by the
+`governance-hub.view` RBAC permission, which is granted only to
+`role:default/architects` — users in the `architects` Keycloak group.
 
 ## CI/CD pipeline demo (OpenShift Pipelines)
 
