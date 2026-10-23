@@ -1,15 +1,15 @@
 # Multi-stage build for the @mcombi/backstage-plugin-governance-hub dynamic plugin.
 #
-# Stage 1: Build the plugin using Node.js and @backstage/cli.
+# Stage 1: Build the plugin using Node.js and @red-hat-developer-hub/cli.
 #   - Installs dependencies
 #   - Runs `backstage-cli package build` (produces CommonJS bundle in dist/)
-#   - Runs `backstage-cli package export-dynamic-plugin --clean` (produces dist-dynamic/)
+#   - Runs `rhdh-cli package export-dynamic-plugin --clean` (produces dist-dynamic/)
 #
 # Stage 2: Minimal OCI image from scratch.
-#   RHDH's dynamic plugin loader expects an OCI image whose root filesystem
-#   contains the exported plugin artifacts at /.
-#   The FROM scratch layer produces the smallest possible image with no shell or
-#   OS overhead.
+#   RHDH 1.10's dynamic plugin loader requires the image to carry the
+#   `io.backstage.dynamic-packages` OCI annotation (JSON array) so the
+#   install-dynamic-plugins.py init-container can discover the plugin.
+#   The annotation is added via LABEL in this stage.
 #
 # Build and push:
 #   bash governance-hub-plugin/build-and-push.sh
@@ -33,7 +33,12 @@ RUN npm run tsc
 RUN npm run build && npm run export-dynamic
 
 # ── Final stage: scratch OCI image ──────────────────────────────────────────
-# RHDH mounts the image filesystem and loads the plugin from /package/dist-dynamic
-# The export-dynamic command places artifacts in dist-dynamic/ relative to /app.
+# RHDH 1.10 install-dynamic-plugins.py reads the `io.backstage.dynamic-packages`
+# OCI image annotation (added via LABEL) to discover plugin packages.
+# Without this annotation the init container raises:
+#   "No plugins found in OCI image … The image might not contain the
+#    'io.backstage.dynamic-packages' annotation."
+# Format: JSON array of {name, version, path} objects (path relative to image root).
 FROM scratch
+LABEL "io.backstage.dynamic-packages"='[{"name":"@mcombi/backstage-plugin-governance-hub","version":"0.1.0","path":"./"}]'
 COPY --from=build /app/dist-dynamic /
