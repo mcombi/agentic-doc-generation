@@ -43,10 +43,12 @@ RUN npm run tsc
 RUN npm run build && npm run export-dynamic
 
 # ── Final stage: scratch OCI image ──────────────────────────────────────────
-# RHDH's install-dynamic-plugins.py extracts the OCI image and looks for the
-# plugin at the subdirectory path matching the annotation key.
-# The annotation key is "backstage-plugin-governance-hub", so plugin files must
-# live at /backstage-plugin-governance-hub/ in the image.
+# janus-cli export-dynamic-plugin writes the annotation:
+#   io.backstage.dynamic-packages=[{"@mcombi/backstage-plugin-governance-hub":{}}]
+# RHDH's install-dynamic-plugins init container reads the package name from this
+# OLD-format annotation and extracts the OCI image layer, then installs the plugin
+# from the directory matching the package name inside the image.
+# Plugin files must be at /@mcombi/backstage-plugin-governance-hub/ in the image.
 # The annotation is injected at build time via podman build --annotation (see
 # build-and-push.sh); it cannot be set here with LABEL.
 FROM scratch
