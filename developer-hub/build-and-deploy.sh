@@ -63,7 +63,12 @@ echo "==> Applying Backstage CR..."
 oc apply -f "${SCRIPT_DIR}/k8s/instance/backstage.yaml"
 
 echo "==> Applying configure-rhdh Job..."
-oc apply -f "${SCRIPT_DIR}/k8s/jobs/configure-rhdh.yaml"
+if oc get namespace openshift-gitops >/dev/null 2>&1; then
+  oc apply -f "${SCRIPT_DIR}/k8s/jobs/configure-rhdh.yaml"
+else
+  echo "  openshift-gitops not found — skipping ArgoCD RBAC (Role/RoleBinding in that namespace)"
+  oc apply -f "${SCRIPT_DIR}/k8s/jobs/configure-rhdh.yaml" || true
+fi
 
 echo "==> Waiting for configure-rhdh Job to complete..."
 oc wait --for=condition=complete job/job-configure-rhdh -n "${NAMESPACE}" \
