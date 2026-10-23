@@ -52,22 +52,35 @@ fi
 
 # ── Path B: Dockerfile build (fallback) ─────────────────────────────────────
 echo "==> Building ${IMAGE}:${TAG} via Dockerfile (Path B)..."
-echo "    NOTE: Dockerfile adds the io.backstage.dynamic-packages LABEL manually."
+echo "    NOTE: annotation is base64-encoded so RHDH 1.10 init container can decode it."
+
+# RHDH 1.10's install-dynamic-plugins init container base64-DECODES the
+# io.backstage.dynamic-packages annotation, then parses JSON and iterates
+# the KEYS of each array element as plugin paths. The correct format is:
+#   [{"<package-name>": {}}]
+# where the key IS the plugin path/name that RHDH will install.
+# Using any other key (e.g. "packagePath", "backstage") causes a
+# "Multiple plugins found" or "No plugins found" error.
+ANNOTATION_JSON='[{"@mcombi/backstage-plugin-governance-hub": {}}]'
+ANNOTATION_B64=$(printf '%s' "$ANNOTATION_JSON" | base64 | tr -d '\n')
 
 if docker buildx version >/dev/null 2>&1; then
   docker buildx build \
     --platform linux/amd64 \
+    --annotation "io.backstage.dynamic-packages=${ANNOTATION_B64}" \
     --tag "${IMAGE}:${TAG}" \
     --push \
     "${SCRIPT_DIR}"
 elif command -v podman >/dev/null 2>&1; then
   podman build \
     --platform linux/amd64 \
+    --annotation "io.backstage.dynamic-packages=${ANNOTATION_B64}" \
     --tag "${IMAGE}:${TAG}" \
     "${SCRIPT_DIR}"
   podman push "${IMAGE}:${TAG}"
 else
   docker build \
+    --annotation "io.backstage.dynamic-packages=${ANNOTATION_B64}" \
     --tag "${IMAGE}:${TAG}" \
     "${SCRIPT_DIR}"
   docker push "${IMAGE}:${TAG}"
