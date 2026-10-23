@@ -30,8 +30,14 @@ IMAGE="quay.io/mcombi/rhdh-gov-hub"
 TAG="${1:-latest}"
 
 # OCI manifest annotation required by RHDH 1.10's install-dynamic-plugins.
-# The init container reads this, resolves plugin paths, and installs each entry.
-ANNOTATION='io.backstage.dynamic-packages=[{"packagePath":".","backstage":{"role":"frontend-plugin","pluginId":"governance-hub","pluginPackageName":"@mcombi/backstage-plugin-governance-hub"}}]'
+# The init container BASE64-DECODES this value then parses it as JSON.
+# Format: array of objects where each KEY is the plugin path.
+# e.g. [{"@mcombi/backstage-plugin-governance-hub": {}}]
+# This is base64-encoded here because passing plain JSON via --annotation
+# results in "Incorrect padding" when RHDH tries to base64-decode it.
+ANNOTATION_JSON='[{"@mcombi/backstage-plugin-governance-hub": {}}]'
+ANNOTATION_B64=$(printf '%s' "${ANNOTATION_JSON}" | base64 | tr -d '\n')
+ANNOTATION="io.backstage.dynamic-packages=${ANNOTATION_B64}"
 
 echo "==> Building ${IMAGE}:${TAG} from ${SCRIPT_DIR}..."
 
