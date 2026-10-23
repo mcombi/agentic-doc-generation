@@ -3,97 +3,71 @@
 # Build the governance-hub dynamic plugin OCI image and push it to quay.io.
 #
 # RHDH 1.10 requires the OCI image to carry the `io.backstage.dynamic-packages`
-# annotation so the install-dynamic-plugins init container can discover plugins.
-# This script offers two build paths:
+# OCI manifest annotation so the install-dynamic-plugins init container can
+# discover the plugin inside the image.
 #
-#   Path A (recommended): @red-hat-developer-hub/cli plugin package
-#     Uses `rhdh-cli plugin package --tag <image> --push` which handles export,
-#     OCI image creation, and annotation injection automatically.
-#     Requires: Node 20+, npm, quay.io login
-#
-#   Path B (Dockerfile fallback): docker/podman build
-#     The Dockerfile manually runs the export step and adds the annotation via
-#     LABEL. Use if the rhdh-cli path is unavailable.
-#     Requires: Docker with buildx or Podman, quay.io login
+# This script uses `janus-cli package export-dynamic-plugin` (via the Dockerfile)
+# to generate the dist-dynamic/ scalprum bundle, then injects the annotation via
+# `podman build --annotation` (or docker buildx --annotation).
 #
 # Prerequisites:
-#   - Logged in to quay.io:
-#       docker login quay.io    (or: podman login quay.io)
+#   - Podman or Docker (with buildx) installed
+#   - Logged in to quay.io: `podman login quay.io` or `docker login quay.io`
 #   - quay.io/mcombi/rhdh-gov-hub repository exists and you have push access
 #
 # Usage:
-#   bash governance-hub-plugin/build-and-push.sh           # push :latest
-#   bash governance-hub-plugin/build-and-push.sh v0.1.0    # push :v0.1.0
-#   SKIP_RHDH_CLI=1 bash governance-hub-plugin/build-and-push.sh   # force Dockerfile path
+#   bash governance-hub-plugin/build-and-push.sh            # push :latest
+#   bash governance-hub-plugin/build-and-push.sh v0.1.0     # push :v0.1.0
 #
-# After pushing, set disabled: false in:
-#   developer-hub/k8s/instance/dynamic-plugins-configmap.yaml
-# then apply: oc apply -f developer-hub/k8s/instance/dynamic-plugins-configmap.yaml
-# and restart: oc rollout restart deployment/backstage-developer-hub -n rhdh
+# After pushing, enable the plugin in RHDH:
+#   1. Set disabled: false in developer-hub/k8s/instance/dynamic-plugins-configmap.yaml
+#   2. oc apply -f developer-hub/k8s/instance/dynamic-plugins-configmap.yaml
+#   3. oc rollout restart deployment/backstage-developer-hub -n rhdh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="quay.io/mcombi/rhdh-gov-hub"
 TAG="${1:-latest}"
 
-# ── Path A: rhdh-cli plugin package (recommended for RHDH 1.10+) ────────────
-if [[ -z "${SKIP_RHDH_CLI:-}" ]] && command -v node >/dev/null 2>&1; then
-  echo "==> Building ${IMAGE}:${TAG} via rhdh-cli plugin package (Path A)..."
-  cd "${SCRIPT_DIR}"
-  npm install --legacy-peer-deps --no-audit
-  npm run tsc
-  npm run build
-  # rhdh-cli plugin package handles export-dynamic + OCI annotation + push
-  npx rhdh-cli plugin package --tag "${IMAGE}:${TAG}" --push
-  echo "==> Pushed ${IMAGE}:${TAG} (with io.backstage.dynamic-packages annotation)"
-  cd - >/dev/null
-  exit 0
-fi
+# OCI manifest annotation required by RHDH 1.10's install-dynamic-plugins.
+# The init container reads this, resolves plugin paths, and installs each entry.
+ANNOTATION='io.backstage.dynamic-packages=[{"packagePath":".","backstage":{"role":"frontend-plugin","pluginId":"governance-hub","pluginPackageName":"@mcombi/backstage-plugin-governance-hub"}}]'
 
-# ── Path B: Dockerfile build (fallback) ─────────────────────────────────────
-echo "==> Building ${IMAGE}:${TAG} via Dockerfile (Path B)..."
-echo "    NOTE: annotation is base64-encoded so RHDH 1.10 init container can decode it."
+echo "==> Building ${IMAGE}:${TAG} from ${SCRIPT_DIR}..."
 
-# RHDH 1.10's install-dynamic-plugins init container base64-DECODES the
-# io.backstage.dynamic-packages annotation, then parses JSON and iterates
-# the KEYS of each array element as plugin paths. The correct format is:
-#   [{"<package-name>": {}}]
-# where the key IS the plugin path/name that RHDH will install.
-# Using any other key (e.g. "packagePath", "backstage") causes a
-# "Multiple plugins found" or "No plugins found" error.
-ANNOTATION_JSON='[{"@mcombi/backstage-plugin-governance-hub": {}}]'
-ANNOTATION_B64=$(printf '%s' "$ANNOTATION_JSON" | base64 | tr -d '\n')
-
-if docker buildx version >/dev/null 2>&1; then
+if command -v podman >/dev/null 2>&1; then
+  podman build \
+    --platform linux/amd64 \
+    --annotation "${ANNOTATION}" \
+    --tag "${IMAGE}:${TAG}" \
+    "${SCRIPT_DIR}"
+  echo "==> Pushing ${IMAGE}:${TAG}..."
+  podman push "${IMAGE}:${TAG}"
+elif docker buildx version >/dev/null 2>&1; then
   docker buildx build \
     --platform linux/amd64 \
-    --annotation "io.backstage.dynamic-packages=${ANNOTATION_B64}" \
+    --annotation "${ANNOTATION}" \
     --tag "${IMAGE}:${TAG}" \
     --push \
     "${SCRIPT_DIR}"
-elif command -v podman >/dev/null 2>&1; then
-  podman build \
-    --platform linux/amd64 \
-    --annotation "io.backstage.dynamic-packages=${ANNOTATION_B64}" \
-    --tag "${IMAGE}:${TAG}" \
-    "${SCRIPT_DIR}"
-  podman push "${IMAGE}:${TAG}"
 else
   docker build \
-    --annotation "io.backstage.dynamic-packages=${ANNOTATION_B64}" \
     --tag "${IMAGE}:${TAG}" \
     "${SCRIPT_DIR}"
   docker push "${IMAGE}:${TAG}"
+  echo "WARNING: docker build does not support --annotation; the OCI annotation"
+  echo "  may be missing. Consider using podman or docker buildx instead."
 fi
 
+echo ""
 echo "==> Pushed ${IMAGE}:${TAG}"
+echo "    OCI annotation 'io.backstage.dynamic-packages' injected via --annotation."
 echo ""
-echo "    To use a digest-pinned reference (recommended for production):"
-echo "      docker inspect --format='{{index .RepoDigests 0}}' ${IMAGE}:${TAG}"
-echo "    Then update dynamic-plugins-configmap.yaml:"
+echo "    To verify: skopeo inspect --raw docker://${IMAGE}:${TAG} | python3 -c \\"
+echo "      \"import sys,json; d=json.load(sys.stdin); print(d.get('annotations',{}).get('io.backstage.dynamic-packages','NOT FOUND'))\""
+echo ""
+echo "    To pin to a digest:"
+echo "      skopeo inspect docker://${IMAGE}:${TAG} | python3 -c \\"
+echo "        \"import sys,json; d=json.load(sys.stdin); print(d['Digest'])\""
+echo "    Then in dynamic-plugins-configmap.yaml:"
 echo "      package: oci://${IMAGE}@sha256:<digest>"
-echo ""
-echo "    After rebuilding, enable the plugin:"
-echo "      1. Set disabled: false in developer-hub/k8s/instance/dynamic-plugins-configmap.yaml"
-echo "      2. oc apply -f developer-hub/k8s/instance/dynamic-plugins-configmap.yaml"
-echo "      3. oc rollout restart deployment/backstage-developer-hub -n rhdh"

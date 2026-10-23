@@ -2,43 +2,48 @@
 #
 # Stage 1: Build the plugin using Node.js and @red-hat-developer-hub/cli.
 #   - Installs dependencies
-#   - Runs `backstage-cli package build` (produces CommonJS bundle in dist/)
-#   - Runs `rhdh-cli package export-dynamic-plugin --clean` (produces dist-dynamic/)
+#   - Runs tsc to generate declaration files (dist-types/)
+#   - Runs backstage-cli package build  →  dist/
+#   - Runs rhdh-cli plugin package --export-to dist-dynamic  →  dist-dynamic/
+#     (replaces @janus-idp/cli export-dynamic-plugin)
 #
 # Stage 2: Minimal OCI image from scratch.
-#   RHDH 1.10's dynamic plugin loader requires the image to carry the
-#   `io.backstage.dynamic-packages` OCI annotation (JSON array) so the
-#   install-dynamic-plugins.py init-container can discover the plugin.
-#   The annotation is added via LABEL in this stage.
+#   RHDH 1.10's install-dynamic-plugins init container reads the OCI image
+#   MANIFEST annotation `io.backstage.dynamic-packages` (a JSON array) to
+#   discover plugin packages.  Without it the container raises:
+#     "No plugins found in OCI image … The image might not contain the
+#      'io.backstage.dynamic-packages' annotation."
 #
-# Build and push:
-#   bash governance-hub-plugin/build-and-push.sh
-#   (or: docker buildx build --platform linux/amd64 -t quay.io/mcombi/rhdh-gov-hub:latest --push .)
+#   IMPORTANT: This annotation MUST be added as an OCI manifest annotation via
+#     podman build --annotation 'io.backstage.dynamic-packages=[{"packagePath":"."}]'
+#   A Dockerfile LABEL writes to the image config, NOT the OCI manifest, and is
+#   NOT read by RHDH's init container.  See build-and-push.sh for the full command.
+#
 FROM node:20-slim AS build
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching
+# Install all deps (including peers) for better layer caching.
 COPY package.json ./
 RUN npm install --legacy-peer-deps --no-audit --include=peer
 
-# Copy source and build configuration
+# Copy source and TypeScript config.
 COPY tsconfig.json ./
 COPY src/ ./src/
 
-# Generate TypeScript declaration files (dist-types/) required by backstage-cli package build
+# Generate TypeScript declaration files required by backstage-cli build.
 RUN npm run tsc
 
-# Build the plugin bundle and export for dynamic plugin loading
+# Build CommonJS bundle (dist/) then export for RHDH 1.10 dynamic loading.
+# npm run export-dynamic -> janus-cli package export-dynamic-plugin --clean
+# which creates dist-dynamic/ containing package.json + scalprum-bundled assets.
+# The io.backstage.dynamic-packages OCI annotation is injected by podman at
+# build time via --annotation (see build-and-push.sh); cannot use LABEL here.
 RUN npm run build && npm run export-dynamic
 
 # ── Final stage: scratch OCI image ──────────────────────────────────────────
-# RHDH 1.10 install-dynamic-plugins.py reads the `io.backstage.dynamic-packages`
-# OCI image annotation (added via LABEL) to discover plugin packages.
-# Without this annotation the init container raises:
-#   "No plugins found in OCI image … The image might not contain the
-#    'io.backstage.dynamic-packages' annotation."
-# Format: JSON array of {name, version, path} objects (path relative to image root).
+# The image root (/) maps to packagePath "." in io.backstage.dynamic-packages.
+# The annotation is injected at build time via podman build --annotation (see
+# build-and-push.sh); it cannot be set here with LABEL.
 FROM scratch
-LABEL "io.backstage.dynamic-packages"='[{"name":"@mcombi/backstage-plugin-governance-hub","version":"0.1.0","path":"./"}]'
 COPY --from=build /app/dist-dynamic /

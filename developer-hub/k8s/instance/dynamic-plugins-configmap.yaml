@@ -86,7 +86,7 @@ data:
       # Visible only to members of role:default/architects (see rbac-policy.yaml).
       # Source: governance-hub-plugin/ — build with build-and-push.sh.
       - package: oci://quay.io/mcombi/rhdh-gov-hub:latest
-        disabled: true
+        disabled: false
         pluginConfig:
           dynamicPlugins:
             frontend:
